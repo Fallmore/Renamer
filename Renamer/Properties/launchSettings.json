@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "Renamer": {
-      "commandName": "Project",
-      "commandLineArgs": " rename --dir \"C:\\Users\\slava\\Pictures\\CSharp Metanit\" --mode AfterSymbol --symbols CSharp --all-directories --replace CSharp"
-    }
-  }
-}

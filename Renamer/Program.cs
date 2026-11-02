@@ -1,5 +1,6 @@
-﻿using System.Buffers;
-using System.CommandLine;
+﻿using System.CommandLine;
+
+namespace Renamer;
 
 internal class Program
 {
@@ -39,6 +40,10 @@ internal class Program
 		{
 			Description = "Включать ли файлы всех подпапок: по умолчанию файлы только указанной папки",
 		};
+		Option<bool> dryRunOption = new("--dry-run", "-n")
+		{
+			Description = "Показать результат без фактического переименования файлов",
+		};
 
 		RootCommand rootCommand = new("Renamer - программа, меняющая название файлов в папке, заменяя указанные символы на ваши");
 
@@ -48,24 +53,30 @@ internal class Program
 			modeOption,
 			symbolsOption,
 			replacingCharsOption,
-			allDirectoriesOption
+			allDirectoriesOption,
+			dryRunOption
 		};
 		rootCommand.Subcommands.Add(renameCommand);
 
 		renameCommand.SetAction(parseResult => {
-			var info = Rename(
+			bool dryRun = parseResult.GetValue(dryRunOption);
+			var info = FileRenamer.Rename(
 				parseResult.GetValue(dirOption)!,
 				parseResult.GetValue(modeOption),
 				parseResult.GetValue(symbolsOption)!,
 				parseResult.GetValue(replacingCharsOption)!,
-				parseResult.GetValue(allDirectoriesOption));
+				parseResult.GetValue(allDirectoriesOption),
+				dryRun);
 			if (!info.Success)
 			{
 				Console.WriteLine($"Ошибка на файле {info.RenamedFiles.Last().OldName}: {info.Error}");
 			}
 			else
 			{
-				Console.WriteLine($"Успех! Переименовано {info.RenamedFiles.Count} файлов");
+				string header = dryRun
+					? $"Предпросмотр (dry-run): было бы переименовано {info.RenamedFiles.Count} файлов, файлы не изменялись"
+					: $"Успех! Переименовано {info.RenamedFiles.Count} файлов";
+				Console.WriteLine(header);
 				foreach (RenamedFile file in info.RenamedFiles)
 				{
 					Console.WriteLine(file.ToString());
@@ -75,96 +86,5 @@ internal class Program
 		});
 
 		return rootCommand.Parse(args).Invoke();
-	}
-
-	private static RenameInfo Rename(DirectoryInfo dir, Mode mode, string[] symbols, string replacingChars, bool allDirectories)
-	{
-		RenameInfo info = new();
-		
-		var files = dir.GetFiles("", allDirectories ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-		SearchValues<string> searchValues = SearchValues.Create(symbols, StringComparison.Ordinal);
-
-		foreach (var file in files)
-		{
-			if (!file.Name.ContainsAny(searchValues)) continue;
-			
-			RenamedFile renamed = new() { OldName = file.Name.Replace(file.Extension, "")};
-			string tempName = Replace(renamed.OldName, replacingChars, mode, symbols);
-
-			int count = 0;
-			string newName = tempName;
-			if (newName == renamed.OldName) continue;
-
-			while (File.Exists(Path.Combine(file.DirectoryName!, newName + file.Extension)))
-			{
-				newName = tempName + string.Concat(" (", ++count, ")");
-			}
-
-			try
-			{
-				renamed.NewName = newName;
-				File.Move(file.FullName, Path.Combine(file.DirectoryName!, newName + file.Extension));
-				info.RenamedFiles.Add(renamed);
-			}
-			catch (Exception e)
-			{
-				info.Error = e.Message;
-				info.RenamedFiles.Add(renamed);
-				return info;
-			}
-		}
-		
-		info.Success = true;
-		return info;
-	}
-
-	private static string Replace(string name, string replacingChars, Mode mode, string[] searchValues)
-	{
-		string newName = name;
-		foreach (var val in searchValues)
-		{
-			int index = newName.IndexOf(val);
-			if (index <= 0) continue;
-
-			switch (mode)
-			{
-				case Mode.OnlySymbol:
-					newName = newName[..index] + replacingChars + newName[(index + val.Length)..];
-					break;
-				case Mode.BeforeSymbol:
-					newName = replacingChars + newName[(index + 1)..];
-					break;
-				case Mode.AfterSymbol:
-					newName = newName[..index] + replacingChars;
-					break;
-			}
-		}
-
-		return newName.Trim();
-	}
-
-	enum Mode
-	{
-		OnlySymbol,
-		BeforeSymbol,
-		AfterSymbol
-	}
-
-	private class RenameInfo
-	{
-		public bool Success { get; set; } = false;
-		public List<RenamedFile> RenamedFiles { get; set; } = [];
-		public string? Error { get; set; } = null;
-	}
-
-	private class RenamedFile
-	{
-		public string OldName { get; set; } = "";
-		public string NewName { get; set; } = "";
-
-		public override string ToString()
-		{
-			return $"{OldName}\n\t=>\t{NewName}";
-		}
 	}
 }
